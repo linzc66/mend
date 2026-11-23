@@ -631,12 +631,16 @@ function findChunkOcc(lines: string[], o: string[], strict: boolean, from: numbe
   const tiers = strict ? [0] : [0, 1, 2];
   for (const t of tiers) {
     const occ = occurrencesAt(lines, o, t, from);
+    if (occ.length === 0) continue;
+    // SPEC section 8: the tier is the first tier at which O occurs at all (section 5);
+    // an end-of-file chunk then takes only an occurrence at that tier ending at the
+    // file's last line, and fails when there is none there.
     if (eof) {
       const good = occ.filter((p) => p + o.length === lines.length);
       if (good.length > 0) return { pos: good[0]!, tier: t };
-    } else if (occ.length > 0) {
-      return { pos: occ[0]!, tier: t };
+      return null;
     }
+    return { pos: occ[0]!, tier: t };
   }
   return null;
 }
@@ -789,6 +793,19 @@ function parseV4a(lines: string[], strict: boolean): Edit[] {
           closeChunk();
           i++;
           continue;
+        }
+        if (cur === null && startedAnyChunk && l.trim() === '') {
+          // SPEC section 8: blank lines at the end of a section (before the
+          // next section or *** End Patch) are not part of it, so a blank
+          // line after an end-of-file chunk that only precedes the end of
+          // the section is skipped, not a parse error.
+          let k = i;
+          while (k < end && lines[k]!.trim() === '') k++;
+          if (k >= end || isSectionStart(lines[k]!)) {
+            i = k;
+            continue;
+          }
+          throw new Exit2(`error: parse ${i + 1}`);
         }
         if (l === '' || l[0] === ' ' || l[0] === '-' || l[0] === '+') {
           if (cur === null) {
